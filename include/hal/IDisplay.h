@@ -35,6 +35,11 @@ public:
     // The implementation must NOT modify the framebuffer contents.
     virtual void Flush(const FrameBuffer& fb) = 0;
 
+    // Returns false when the display signals the application should exit.
+    // On PC: wraps Raylib's WindowShouldClose().
+    // On ESP32: always returns true (the device never "closes").
+    virtual bool IsRunning() const = 0;
+
     // Shuts down the display hardware (PC: closes window; ESP32: no-op).
     virtual void Shutdown() = 0;
 };
