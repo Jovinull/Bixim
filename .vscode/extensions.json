@@ -1,0 +1,47 @@
+{
+  // VS Code reads this file automatically when the workspace is opened.
+  // A popup will appear asking to install any missing recommended extensions.
+  //
+  // IMPORTANT — PlatformIO:
+  //   Install ONLY the official extension: publisher "platformio" (platformio.platformio-ide)
+  //   There are third-party extensions with similar names (e.g., by "DavidGomes") that
+  //   do NOT install PlatformIO Core and will NOT work with this project.
+  //   Always confirm the Extension ID before installing.
+  "recommendations": [
+    // -------------------------------------------------------------------------
+    // PlatformIO — Build system, library manager, ESP32 uploader
+    // Publisher : PlatformIO (official)
+    // IMPORTANT : Do NOT install any other extension named "PlatformIO".
+    //             Verify the ID below before clicking Install.
+    // -------------------------------------------------------------------------
+    "platformio.platformio-ide",
+
+    // -------------------------------------------------------------------------
+    // C/C++ Tooling — Microsoft official extensions
+    // -------------------------------------------------------------------------
+
+    // IntelliSense, debugging, code browsing for C and C++
+    "ms-vscode.cpptools",
+
+    // Meta-package: installs cpptools + cmake-tools + makefile-tools at once
+    "ms-vscode.cpptools-extension-pack",
+
+    // Color themes optimized for C/C++ syntax
+    "ms-vscode.cpptools-themes",
+
+    // CMake project configuration and build integration
+    "ms-vscode.cmake-tools",
+
+    // Makefile support (used by PlatformIO native builds internally)
+    "ms-vscode.makefile-tools",
+
+    // -------------------------------------------------------------------------
+    // clangd — Alternative IntelliSense engine (faster, more accurate)
+    // Publisher : LLVM (official)
+    // Note      : If enabled alongside cpptools, disable cpptools IntelliSense
+    //             in settings to avoid conflicts (set C_Cpp.intelliSenseEngine
+    //             to "disabled").
+    // -------------------------------------------------------------------------
+    "llvm-vs-code-extensions.vscode-clangd"
+  ]
+}
