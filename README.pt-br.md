@@ -52,7 +52,8 @@ A etapa de prototipagem física e manufatura da carcaça final pode ser realizad
 ## Roadmap e Funcionalidades Futuras
 
 - [x] Prototipagem da lógica de estados e renderização na matriz OLED (Timestep Fixo & HAL implementados).
-- [ ] Implementação do sistema de debouncing e controle PWM de áudio.
+- [x] Implementação da camada de entrada abstraída e debouncing (IInput HAL).
+- [ ] Implementação de áudio (Buzzer PWM).
 - [ ] Otimização de consumo energético (Sleep Modes do ESP32).
 - [ ] Integração do hardware final na carcaça.
 - [ ] **Multiplayer via ESP-NOW:** Implementação de comunicação ponto-a-ponto de baixa latência para interação entre dois dispositivos físicos próximos.
@@ -259,6 +260,7 @@ bixim/
 ├── include/            # Arquivos de cabeçalho compartilhados (.h / .hpp)
 ├── lib/                # Bibliotecas locais (específicas do projeto, não do registry)
 ├── hardware/           # Esquemáticos, arquivos KiCad, BOM
+├── docs/               # Marcos técnicos e documentação de arquitetura
 ├── README.md
 └── README.pt-br.md
 ```

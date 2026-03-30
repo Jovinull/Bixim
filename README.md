@@ -52,7 +52,8 @@ The physical prototyping and manufacturing of the final case can be done through
 ## Roadmap and Future Features
 
 - [x] Prototyping state logic and rendering on the OLED matrix (Fixed Timestep & HAL implemented).
-- [ ] Implementation of debouncing system and audio PWM control.
+- [x] Implementation of hardware-abstracted input system and debouncing (IInput HAL).
+- [ ] Implementation of audio system (Buzzer PWM).
 - [ ] Energy consumption optimization (ESP32 Sleep Modes).
 - [ ] Integration of final hardware into the case.
 - [ ] **Multiplayer via ESP-NOW:** Implementation of low-latency peer-to-peer communication for interaction between two nearby physical devices.
@@ -259,6 +260,7 @@ bixim/
 ├── include/            # Shared header files (.h / .hpp)
 ├── lib/                # Local libraries (project-specific, not from registry)
 ├── hardware/           # Schematics, KiCad files, BOM
+├── docs/               # Technical milestones and architecture documentation
 ├── README.md
 └── README.pt-br.md
 ```

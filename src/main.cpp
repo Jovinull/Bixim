@@ -8,10 +8,10 @@
 //   LOGIC_HZ   = 10 Hz  → LOGIC_TICK_US = 100,000 µs per logic step
 //   TARGET_FPS = 30     → FRAME_BUDGET_US = 33,333 µs per render frame
 //
-// Rendering pipeline:
-//   Game logic draws into a FrameBuffer (1024 bytes, software).
-//   At the end of each render frame, IDisplay::Flush() transfers the
-//   buffer to the physical display (Raylib window on PC, SSD1306 on ESP32).
+// HAL modules in use:
+//   ITimer   — platform clock (TimerPC / TimerESP32)
+//   IDisplay — framebuffer flush (DisplayPC / DisplayESP32)
+//   IInput   — button state (InputPC / InputESP32)
 // =============================================================================
 
 // -----------------------------------------------------------------------------
@@ -21,6 +21,7 @@
     #include <cstdio>
     #include "hal/TimerPC.h"
     #include "hal/DisplayPC.h"
+    #include "hal/InputPC.h"
 #endif
 
 #ifdef PLATFORM_ESP32
@@ -28,10 +29,12 @@
     #include <Wire.h>
     #include "hal/TimerESP32.h"
     #include "hal/DisplayESP32.h"
+    #include "hal/InputESP32.h"
 #endif
 
 #include "hal/ITimer.h"
 #include "hal/IDisplay.h"
+#include "hal/IInput.h"
 #include "hal/FrameBuffer.h"
 
 // =============================================================================
@@ -46,39 +49,57 @@ static constexpr uint32_t MAX_LOGIC_TICKS_PER_FRAME  = 5;
 // =============================================================================
 // Demo sprite data — 16x16 pixels, horizontal format (MSB = leftmost pixel)
 // =============================================================================
-// A simple face for display testing. Each row is 2 bytes (16 pixels).
-// Replace this with real pet sprite data in the Sprite module.
-static const uint8_t SPRITE_FACE[16 * 2] = {
-    0b00111100, 0b00111100, // row  0
-    0b01000010, 0b01000010, // row  1
-    0b10100101, 0b10100101, // row  2  (eyes)
-    0b10000001, 0b10000001, // row  3
-    0b10000001, 0b10000001, // row  4
-    0b10100101, 0b10100101, // row  5  (nostrils)
-    0b10011001, 0b10011001, // row  6  (mouth)
-    0b01000010, 0b01000010, // row  7
-    0b00111100, 0b00111100, // row  8
-    0b00000000, 0b00000000, // row  9
-    0b00000000, 0b00000000, // row 10
-    0b00000000, 0b00000000, // row 11
-    0b00000000, 0b00000000, // row 12
-    0b00000000, 0b00000000, // row 13
-    0b00000000, 0b00000000, // row 14
-    0b00000000, 0b00000000, // row 15
+// Sprite A — simple face (default)
+static const uint8_t SPRITE_FACE_A[16 * 2] = {
+    0b00111100, 0b00000000,
+    0b01000010, 0b00000000,
+    0b10100101, 0b00000000,
+    0b10000001, 0b00000000,
+    0b10000001, 0b00000000,
+    0b10100101, 0b00000000,
+    0b10011001, 0b00000000,
+    0b01000010, 0b00000000,
+    0b00111100, 0b00000000,
+    0b00000000, 0b00000000,
+    0b00000000, 0b00000000,
+    0b00000000, 0b00000000,
+    0b00000000, 0b00000000,
+    0b00000000, 0b00000000,
+    0b00000000, 0b00000000,
+    0b00000000, 0b00000000,
 };
 
-// Mask: all pixels inside the sprite bounding circle are opaque.
-// Outside pixels are transparent (0) so the background shows through.
+// Sprite B — surprised face (shown when Button B is pressed)
+static const uint8_t SPRITE_FACE_B[16 * 2] = {
+    0b00111100, 0b00000000,
+    0b01000010, 0b00000000,
+    0b10110101, 0b00000000,
+    0b10000001, 0b00000000,
+    0b10000001, 0b00000000,
+    0b10001001, 0b00000000,
+    0b10111101, 0b00000000,
+    0b01000010, 0b00000000,
+    0b00111100, 0b00000000,
+    0b00000000, 0b00000000,
+    0b00000000, 0b00000000,
+    0b00000000, 0b00000000,
+    0b00000000, 0b00000000,
+    0b00000000, 0b00000000,
+    0b00000000, 0b00000000,
+    0b00000000, 0b00000000,
+};
+
+// Shared circular mask for both sprites
 static const uint8_t MASK_FACE[16 * 2] = {
-    0b00111100, 0b00111100,
-    0b01111110, 0b01111110,
-    0b11111111, 0b11111111,
-    0b11111111, 0b11111111,
-    0b11111111, 0b11111111,
-    0b11111111, 0b11111111,
-    0b11111111, 0b11111111,
-    0b01111110, 0b01111110,
-    0b00111100, 0b00111100,
+    0b00111100, 0b00000000,
+    0b01111110, 0b00000000,
+    0b11111111, 0b00000000,
+    0b11111111, 0b00000000,
+    0b11111111, 0b00000000,
+    0b11111111, 0b00000000,
+    0b11111111, 0b00000000,
+    0b01111110, 0b00000000,
+    0b00111100, 0b00000000,
     0b00000000, 0b00000000,
     0b00000000, 0b00000000,
     0b00000000, 0b00000000,
@@ -89,53 +110,105 @@ static const uint8_t MASK_FACE[16 * 2] = {
 };
 
 // =============================================================================
-// Forward declarations — game modules
+// Game state (shared between platforms via static storage)
 // =============================================================================
-void GameInit(IDisplay& display, FrameBuffer& fb);
-void UpdateLogic(uint64_t tick_count, FrameBuffer& fb);
+static int  g_sprite_x       = (128 - 16) / 2;   // horizontal position, starts centered
+static int  g_sprite_y       = (64  - 16) / 2;   // vertical position, stays centered
+static bool g_use_sprite_b   = false;              // false = face A, true = face B
+
+// Movement step in pixels per logic tick (10 Hz → 10 px/s at step=1)
+static constexpr int MOVE_STEP = 3;
+
+// =============================================================================
+// Forward declarations
+// =============================================================================
+void GameInit   (IDisplay& display, IInput& input, FrameBuffer& fb);
+void UpdateLogic(IInput& input, FrameBuffer& fb, uint64_t tick_count);
 void RenderGraphics(IDisplay& display, const FrameBuffer& fb);
 void GameShutdown(IDisplay& display);
 
 // =============================================================================
-// Stub implementations
+// Implementation
 // =============================================================================
-void GameInit(IDisplay& display, FrameBuffer& fb)
+
+void GameInit(IDisplay& display, IInput& input, FrameBuffer& fb)
 {
     if (!display.Init()) {
-        // On ESP32 Init() already prints the error. On PC, Raylib opens the window.
-        // If Init() fails on ESP32, halt here.
 #ifdef PLATFORM_ESP32
         for (;;) {}
 #endif
     }
+    input.Init();
     fb.Clear();
 }
 
-void UpdateLogic(uint64_t tick_count, FrameBuffer& fb)
+void UpdateLogic(IInput& input, FrameBuffer& fb, uint64_t tick_count)
 {
+    // --- 1. Sample input (must be first in UpdateLogic) ---
+    input.Update();
+
+    // --- 2. Process button events ---
+
+    // Button A — move sprite left
+    if (input.IsHeld(Button::A)) {
+        g_sprite_x -= MOVE_STEP;
+        // Clamp to display bounds
+        if (g_sprite_x < 0) g_sprite_x = 0;
+
+#ifdef PLATFORM_PC
+        printf("[Input] A held — sprite_x = %d\n", g_sprite_x);
+#else
+        Serial.print(F("[Input] A held — sprite_x = "));
+        Serial.println(g_sprite_x);
+#endif
+    }
+
+    // Button C — move sprite right
+    if (input.IsHeld(Button::C)) {
+        g_sprite_x += MOVE_STEP;
+        // Clamp: sprite is 16px wide
+        if (g_sprite_x > DISPLAY_WIDTH - 16) g_sprite_x = DISPLAY_WIDTH - 16;
+
+#ifdef PLATFORM_PC
+        printf("[Input] C held — sprite_x = %d\n", g_sprite_x);
+#else
+        Serial.print(F("[Input] C held — sprite_x = "));
+        Serial.println(g_sprite_x);
+#endif
+    }
+
+    // Button B — toggle between sprite A and B (fires once per press)
+    if (input.IsPressed(Button::B)) {
+        g_use_sprite_b = !g_use_sprite_b;
+
+#ifdef PLATFORM_PC
+        printf("[Input] B pressed — sprite = %s\n", g_use_sprite_b ? "B" : "A");
+#else
+        Serial.print(F("[Input] B pressed — sprite = "));
+        Serial.println(g_use_sprite_b ? F("B") : F("A"));
+#endif
+    }
+
+    // --- 3. Draw frame ---
     fb.Clear();
 
-    // Draw a static checkerboard border as background.
-    for (int x = 0; x < DISPLAY_WIDTH; ++x) {
-        drawPixel(fb, x, 0,                 true);
+    // Border
+    for (int x = 0; x < DISPLAY_WIDTH;  ++x) {
+        drawPixel(fb, x, 0,                  true);
         drawPixel(fb, x, DISPLAY_HEIGHT - 1, true);
     }
     for (int y = 0; y < DISPLAY_HEIGHT; ++y) {
-        drawPixel(fb, 0,                   y, true);
-        drawPixel(fb, DISPLAY_WIDTH - 1,   y, true);
+        drawPixel(fb, 0,                  y, true);
+        drawPixel(fb, DISPLAY_WIDTH - 1,  y, true);
     }
 
-    // Animate the sprite position horizontally using tick_count.
-    // The face bounces between X=10 and X=102 (128 - 16 - 10).
-    const int range  = DISPLAY_WIDTH - 16 - 20; // 92
-    const int period = LOGIC_HZ * 4;             // 4 seconds per cycle
-    const int phase  = static_cast<int>(tick_count % (period * 2));
-    const int offset = (phase < period) ? phase : (period * 2 - phase);
-    const int sprite_x = 10 + (offset * range / period);
-    const int sprite_y = (DISPLAY_HEIGHT - 16) / 2; // vertically centered
+    // Sprite
+    const uint8_t* active_sprite = g_use_sprite_b ? SPRITE_FACE_B : SPRITE_FACE_A;
+    drawSprite(fb, g_sprite_x, g_sprite_y, active_sprite, MASK_FACE, 16, 16);
 
-    drawSprite(fb, sprite_x, sprite_y,
-               SPRITE_FACE, MASK_FACE, 16, 16);
+    // Suppress unused parameter warning on configurations where tick_count
+    // is not yet used for animation.
+    (void)tick_count;
 }
 
 void RenderGraphics(IDisplay& display, const FrameBuffer& fb)
@@ -155,20 +228,21 @@ void GameShutdown(IDisplay& display)
 
 int main(void)
 {
-    TimerPC    timer;
-    DisplayPC  display;
+    TimerPC     timer;
+    DisplayPC   display;
+    InputPC     input;
     FrameBuffer fb;
 
-    GameInit(display, fb);
+    GameInit(display, input, fb);
 
-    uint64_t t_last    = timer.GetMicroseconds();
-    uint64_t accum     = 0;
+    uint64_t t_last     = timer.GetMicroseconds();
+    uint64_t accum      = 0;
     uint64_t tick_count = 0;
 
     while (display.IsRunning()) {
         // --- 1. Delta time ---
         const uint64_t t_now  = timer.GetMicroseconds();
-        uint64_t delta = t_now - t_last;
+        uint64_t       delta  = t_now - t_last;
         t_last = t_now;
 
         const uint64_t MAX_DELTA = MAX_LOGIC_TICKS_PER_FRAME * LOGIC_TICK_US;
@@ -180,7 +254,7 @@ int main(void)
         // --- 3. Fixed-rate logic ticks ---
         uint32_t ticks_this_frame = 0;
         while (accum >= LOGIC_TICK_US && ticks_this_frame < MAX_LOGIC_TICKS_PER_FRAME) {
-            UpdateLogic(tick_count, fb);
+            UpdateLogic(input, fb, tick_count);
             accum -= LOGIC_TICK_US;
             ++tick_count;
             ++ticks_this_frame;
@@ -209,6 +283,7 @@ int main(void)
 
 static TimerESP32   timer;
 static DisplayESP32 display;
+static InputESP32   input;
 static FrameBuffer  fb;
 
 static uint64_t t_last     = 0;
@@ -219,15 +294,15 @@ void setup()
 {
     Serial.begin(115200);
     Serial.println(F("[Bixim] Booting..."));
-    GameInit(display, fb);
+    GameInit(display, input, fb);
     t_last = timer.GetMicroseconds();
-    Serial.println(F("[Bixim] Boot complete."));
+    Serial.println(F("[Bixim] Boot complete. Buttons: A=GPIO25 B=GPIO26 C=GPIO27"));
 }
 
 void loop()
 {
     const uint64_t t_now  = timer.GetMicroseconds();
-    uint64_t delta = t_now - t_last;
+    uint64_t       delta  = t_now - t_last;
     t_last = t_now;
 
     const uint64_t MAX_DELTA = MAX_LOGIC_TICKS_PER_FRAME * LOGIC_TICK_US;
@@ -237,7 +312,7 @@ void loop()
 
     uint32_t ticks_this_frame = 0;
     while (accum >= LOGIC_TICK_US && ticks_this_frame < MAX_LOGIC_TICKS_PER_FRAME) {
-        UpdateLogic(tick_count, fb);
+        UpdateLogic(input, fb, tick_count);
         accum -= LOGIC_TICK_US;
         ++tick_count;
         ++ticks_this_frame;
