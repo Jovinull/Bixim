@@ -9,17 +9,22 @@ Diferente de emuladores tradicionais que dependem de dumps de ROMs proprietária
 
 ## Arquitetura de Software e Escolha Tecnológica
 
-O núcleo do sistema foi desenvolvido inteiramente em **C/C++**. A escolha desta linguagem justifica-se pelos seguintes fatores:
+O núcleo do sistema foi desenvolvido inteiramente em **C/C++17**. A escolha desta linguagem justifica-se pelos seguintes fatores:
 
-1.  **Gerenciamento de Memória e Performance:** O desenvolvimento bare-metal ou baseado em RTOS no ESP32 exige controle rigoroso sobre a alocação de memória e ciclos de CPU. C/C++ oferece a granularidade necessária para garantir uma taxa de atualização de quadros (FPS) estável no display OLED, sem os gargalos de linguagens interpretadas.
-2.  **Eficiência Energética:** O código compilado nativamente minimiza o tempo ativo do processador, permitindo o uso de estratégias de *deep sleep* do ESP32 de forma mais eficiente, o que é crítico para um dispositivo alimentado por uma pequena bateria LiPo.
-3.  **Interação com Hardware:** A manipulação direta de registradores, interrupções (ISRs) para leitura de botões e controle de modulação por largura de pulso (PWM) para o buzzer são implementados com máxima eficiência através das bibliotecas nativas em C/C++.
+1. **Gerenciamento de Memória e Performance:** O desenvolvimento bare-metal ou baseado em RTOS no ESP32 exige controle rigoroso sobre a alocação de memória e ciclos de CPU. C/C++ oferece a granularidade necessária para garantir uma taxa de atualização de quadros (FPS) estável no display OLED, sem os gargalos de linguagens interpretadas.
+2. **Eficiência Energética:** O código compilado nativamente minimiza o tempo ativo do processador, permitindo o uso de estratégias de *deep sleep* do ESP32 de forma mais eficiente, o que é crítico para um dispositivo alimentado por uma pequena bateria LiPo.
+3. **Interação com Hardware:** A manipulação direta de registradores, interrupções (ISRs) para leitura de botões e controle de modulação por largura de pulso (PWM) para o buzzer são implementados com máxima eficiência através das bibliotecas nativas em C/C++.
 
-### Lógica de Estado (Game Engine Customizada)
-A engine interna não emula o processador Epson S1C63 original. Em vez disso, ela implementa uma máquina de estados finitos (FSM) que simula o ciclo orgânico do sistema:
-* **Módulo de Vida:** Gerencia variáveis de decaimento temporal (Fome, Sono, Felicidade, Idade).
-* **Módulo de Renderização:** Transforma matrizes de bits em sinais I2C para atualização do display OLED.
-* **Módulo de Interrupção:** Lida com o debouncing dos botões físicos via hardware/software para garantir respostas precisas do usuário.
+### Arquitetura de Software: HAL e Game Loop
+
+O projeto implementa uma arquitetura de engine moderna, focada em comportamento determinístico e portabilidade:
+
+* **Hardware Abstraction Layer (HAL):** Interfaces principais (`IDisplay`, `ITimer`) permitem que o mesmo código de lógica rode sem modificações tanto no Windows (usando Raylib para simulação) quanto no ESP32 (usando drivers SSD1306 via I2C).
+* **Arquitetura do Game Loop:** Utiliza um **Acumulador de Timestep Fixo** (Fixed Timestep Accumulator). Isso desacopla a lógica (rodando a 10 Hz fixos) da renderização (alvo de 30 FPS), garantindo velocidade de simulação consistente independente de variações na CPU ou taxa de atualização do display.
+* **Lógica de Estado (Game Engine Customizada):** A engine interna implementa uma máquina de estados finitos (FSM) que simula o ciclo orgânico do sistema:
+    * **Módulo de Vida:** Gerencia variáveis de decaimento temporal (Fome, Sono, Felicidade, Idade).
+    * **Módulo de Renderização:** Uma classe **FrameBuffer** customizada gerencia a matriz de bits 128x64 monocromática, otimizada para transferências I2C.
+    * **Módulo de Interrupção:** Lida com o debouncing dos botões físicos via hardware/software.
 
 ## Especificações de Hardware (Bill of Materials - BOM)
 
@@ -46,7 +51,7 @@ A etapa de prototipagem física e manufatura da carcaça final pode ser realizad
 
 ## Roadmap e Funcionalidades Futuras
 
-- [ ] Prototipagem da lógica de estados e renderização na matriz OLED.
+- [x] Prototipagem da lógica de estados e renderização na matriz OLED (Timestep Fixo & HAL implementados).
 - [ ] Implementação do sistema de debouncing e controle PWM de áudio.
 - [ ] Otimização de consumo energético (Sleep Modes do ESP32).
 - [ ] Integração do hardware final na carcaça.
@@ -72,7 +77,7 @@ Esta seção cobre a configuração completa para uma máquina Windows limpa. Si
 
 1. Acesse **code.visualstudio.com** e baixe o instalador **Windows x64**.
 2. Execute o instalador. Durante a configuração, marque **"Add to PATH"** e **"Register Code as an editor for supported file types"**.
-3. Verifique a instalação abrindo um novo terminal (`Win + R` → `cmd`) e executando:
+3. Verifique a instalação abrindo um novo terminal (`Win + R` -> `cmd`) e executando:
    ```
    code --version
    ```
@@ -115,9 +120,9 @@ Test-Path "C:\Users\$env:USERNAME\.platformio\penv\Scripts\pio.exe"
 Se retornar `True`, prossiga. Se retornar `False`, abra o VS Code, aguarde o PlatformIO terminar a configuração inicial (barra de progresso na barra de status inferior) e verifique novamente.
 
 **Adicionar ao PATH do sistema:**
-1. Abra **Iniciar** → pesquise **"Editar as variáveis de ambiente do sistema"**.
+1. Abra **Iniciar** -> pesquise **"Editar as variáveis de ambiente do sistema"**.
 2. Clique em **"Variáveis de Ambiente..."**.
-3. Em **Variáveis do sistema**, selecione `Path` → clique em **Editar** → clique em **Novo**.
+3. Em **Variáveis do sistema**, selecione `Path` -> clique em **Editar** -> clique em **Novo**.
 4. Adicione o caminho abaixo (substitua `felip` pelo seu nome de usuário Windows):
    ```
    C:\Users\felip\.platformio\penv\Scripts
@@ -130,7 +135,7 @@ pio --version
 ```
 Saída esperada: `PlatformIO Core, version 6.x.x`
 
-> **Nota:** Os comandos `pio` também podem ser executados pelo terminal integrado do VS Code (`Ctrl + `` ` ``) sem esta alteração de PATH, pois o VS Code configura seu próprio ambiente de terminal. O passo de PATH só é necessário para executar `pio` em janelas standalone de PowerShell ou Prompt de Comando.
+> **Nota:** Os comandos `pio` também podem ser executados pelo terminal integrado do VS Code (`Ctrl + ` `) sem esta alteração de PATH, pois o VS Code configura seu próprio ambiente de terminal. O passo de PATH só é necessário para executar `pio` em janelas standalone de PowerShell ou Prompt de Comando.
 
 ---
 
@@ -154,7 +159,7 @@ O MSYS2 fornece o compilador GCC/G++ necessário para buildar e executar o ambie
    pacman -S --needed mingw-w64-x86_64-gcc mingw-w64-x86_64-gdb make
    ```
 6. Adicione o MinGW-w64 ao PATH do sistema Windows:
-   - Abra **Iniciar** → pesquise **"Editar as variáveis de ambiente do sistema"**.
+   - Abra **Iniciar** -> pesquise **"Editar as variáveis de ambiente do sistema"**.
    - Clique em **"Variáveis de Ambiente..."**.
    - Em **Variáveis do sistema**, selecione `Path` e clique em **Editar**.
    - Clique em **Novo** e adicione: `C:\msys64\mingw64\bin`
@@ -203,7 +208,7 @@ O ambiente `native` compila o projeto como um executável Windows padrão usando
 
 **Via VS Code:**
 - Clique no ícone do PlatformIO na barra lateral.
-- Em **Project Tasks → native**, clique em **Build** e depois em **Upload and Monitor** (que executa o binário).
+- Em **Project Tasks -> native**, clique em **Build** e depois em **Upload and Monitor** (que executa o binário).
 
 **Via terminal (na raiz do projeto):**
 ```bash
@@ -221,11 +226,11 @@ Uma janela intitulada **"Bixim - Native Debug Build"** deve abrir.
 ### Passo 7 — Build e Flash: Ambiente ESP32
 
 1. Conecte sua placa ESP32 via USB.
-2. Identifique a porta COM: abra o **Gerenciador de Dispositivos** (`Win + X` → Gerenciador de Dispositivos) → expanda **Portas (COM e LPT)** → anote a porta (ex: `COM3`).
+2. Identifique a porta COM: abra o **Gerenciador de Dispositivos** (`Win + X` -> Gerenciador de Dispositivos) -> expanda **Portas (COM e LPT)** -> anote a porta (ex: `COM3`).
 3. No VS Code, o PlatformIO detecta a porta automaticamente. Se não detectar, adicione `upload_port = COMX` à seção `[env:esp32dev]` no `platformio.ini`.
 
 **Via VS Code:**
-- Em **Project Tasks → esp32dev**, clique em **Upload**.
+- Em **Project Tasks -> esp32dev**, clique em **Upload**.
 
 **Via terminal:**
 ```bash

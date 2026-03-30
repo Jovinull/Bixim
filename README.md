@@ -9,17 +9,22 @@ Unlike traditional emulators that rely on proprietary ROM dumps, this project us
 
 ## Software Architecture and Technology Choice
 
-The system core was developed entirely in **C/C++**. The choice of this language is justified by the following factors:
+The system core was developed entirely in **C/C++17**. The choice of this language is justified by the following factors:
 
 1. **Memory Management and Performance:** Bare-metal or RTOS-based development on the ESP32 requires strict control over memory allocation and CPU cycles. C/C++ provides the granularity needed to ensure a stable frame rate (FPS) on the OLED display, without the bottlenecks of interpreted languages.
 2. **Energy Efficiency:** Natively compiled code minimizes processor active time, allowing for more efficient use of ESP32 *deep sleep* strategies, which is critical for a device powered by a small LiPo battery.
 3. **Hardware Interaction:** Direct manipulation of registers, interrupts (ISRs) for button reading, and pulse-width modulation (PWM) control for the buzzer are implemented with maximum efficiency using native C/C++ libraries.
 
-### State Logic (Custom Game Engine)
-The internal engine does not emulate the original Epson S1C63 processor. Instead, it implements a finite state machine (FSM) that simulates the system's organic cycle:
-* **Life Module:** Manages temporal decay variables (Hunger, Sleep, Happiness, Age).
-* **Rendering Module:** Transforms bit matrices into I2C signals for OLED display updates.
-* **Interrupt Module:** Handles hardware/software debouncing of physical buttons to ensure precise user responses.
+### Software Architecture: HAL and Game Loop
+
+The project implements a modern game engine architecture designed for deterministic behavior and portability:
+
+* **Hardware Abstraction Layer (HAL):** Key interfaces (`IDisplay`, `ITimer`) allow the same logic code to run unmodified on both Windows (using Raylib for simulation) and ESP32 (using SSD1306 OLED drivers via I2C).
+* **Game Loop Architecture:** Uses a **Fixed Timestep Accumulator**. This decouples logic (running at a fixed 10 Hz) from rendering (targeting 30 FPS), ensuring consistent simulation speed regardless of CPU variance or display refreshrate.
+* **State Logic (Custom Game Engine):** The internal engine implements a finite state machine (FSM) that simulates the system's organic cycle:
+    * **Life Module:** Manages temporal decay variables (Hunger, Sleep, Happiness, Age).
+    * **Rendering Module:** A custom **FrameBuffer** class manages the 128x64 monochromatic bit matrix, optimized for I2C transfers.
+    * **Interrupt Module:** Handles hardware/software debouncing of physical buttons.
 
 ## Hardware Specifications (Bill of Materials - BOM)
 
@@ -46,7 +51,7 @@ The physical prototyping and manufacturing of the final case can be done through
 
 ## Roadmap and Future Features
 
-- [ ] Prototyping state logic and rendering on the OLED matrix.
+- [x] Prototyping state logic and rendering on the OLED matrix (Fixed Timestep & HAL implemented).
 - [ ] Implementation of debouncing system and audio PWM control.
 - [ ] Energy consumption optimization (ESP32 Sleep Modes).
 - [ ] Integration of final hardware into the case.
@@ -72,7 +77,7 @@ This section covers the complete setup for a clean Windows machine. Follow each 
 
 1. Go to **code.visualstudio.com** and download the **Windows x64** installer.
 2. Run the installer. During setup, check **"Add to PATH"** and **"Register Code as an editor for supported file types"**.
-3. Verify the installation by opening a new terminal (`Win + R` → `cmd`) and running:
+3. Verify the installation by opening a new terminal (`Win + R` -> `cmd`) and running:
    ```
    code --version
    ```
@@ -115,9 +120,9 @@ Test-Path "C:\Users\$env:USERNAME\.platformio\penv\Scripts\pio.exe"
 If it returns `True`, proceed. If it returns `False`, open VS Code, wait for PlatformIO to finish initial configuration (progress bar in the bottom status bar), and check again.
 
 **Add to system PATH:**
-1. Open **Start** → search for **"Edit the system environment variables"**.
+1. Open **Start** -> search for **"Edit the system environment variables"**.
 2. Click **"Environment Variables..."**.
-3. Under **System variables**, select `Path` → click **Edit** → click **New**.
+3. Under **System variables**, select `Path` -> click **Edit** -> click **New**.
 4. Add the path below (replace `felip` with your Windows username):
    ```
    C:\Users\felip\.platformio\penv\Scripts
@@ -154,7 +159,7 @@ MSYS2 provides the GCC/G++ compiler needed to build and run the `native` (PC) en
    pacman -S --needed mingw-w64-x86_64-gcc mingw-w64-x86_64-gdb make
    ```
 6. Add MinGW-w64 to the Windows system PATH:
-   - Open **Start** → search for **"Edit the system environment variables"**.
+   - Open **Start** -> search for **"Edit the system environment variables"**.
    - Click **"Environment Variables..."**.
    - Under **System variables**, select `Path` and click **Edit**.
    - Click **New** and add: `C:\msys64\mingw64\bin`
@@ -203,7 +208,7 @@ The `native` environment compiles the project as a standard Windows executable u
 
 **Via VS Code:**
 - Click the PlatformIO icon in the sidebar.
-- Under **Project Tasks → native**, click **Build** and then **Upload and Monitor** (which executes the binary).
+- Under **Project Tasks -> native**, click **Build** and then **Upload and Monitor** (which executes the binary).
 
 **Via terminal (in project root):**
 ```bash
@@ -221,11 +226,11 @@ A window titled **"Bixim - Native Debug Build"** should open.
 ### Step 7 — Build and Flash: ESP32 Environment
 
 1. Connect your ESP32 board via USB.
-2. Identify the COM port: open **Device Manager** (`Win + X` → Device Manager) → expand **Ports (COM and LPT)** → note the port (e.g., `COM3`).
+2. Identify the COM port: open **Device Manager** (`Win + X` -> Device Manager) -> expand **Ports (COM and LPT)** -> note the port (e.g., `COM3`).
 3. In VS Code, PlatformIO detects the port automatically. If not detected, add `upload_port = COMX` to the `[env:esp32dev]` section in `platformio.ini`.
 
 **Via VS Code:**
-- Under **Project Tasks → esp32dev**, click **Upload**.
+- Under **Project Tasks -> esp32dev**, click **Upload**.
 
 **Via terminal:**
 ```bash
