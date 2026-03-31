@@ -3,6 +3,7 @@
 // File   : src/hal/FrameBuffer.cpp
 // =============================================================================
 #include "hal/FrameBuffer.h"
+#include "hal/Font5x7.h"
 
 // =============================================================================
 // drawPixel
@@ -133,6 +134,96 @@ void drawSprite(FrameBuffer& fb,
             //     Result: background was cleared, sprite is painted.
             //
             fb.data[byte_index] |= static_cast<uint8_t>((sprite_pixel & mask_pixel) << bit_position);
+        }
+    }
+}
+
+// =============================================================================
+// drawChar
+// =============================================================================
+void drawChar(FrameBuffer& fb, int x, int y, char c)
+{
+    // Bounds check: if the character origin is entirely off-screen, skip it.
+    if (x + FONT_CHAR_W < 0 || x >= DISPLAY_WIDTH  ||
+        y + FONT_CHAR_H < 0 || y >= DISPLAY_HEIGHT) {
+        return;
+    }
+
+    // Map ASCII to font table index. Characters outside the range render as space.
+    const uint8_t ascii = static_cast<uint8_t>(c);
+    const int idx = (ascii >= FONT_FIRST_CHAR && ascii <= FONT_LAST_CHAR)
+                    ? (ascii - FONT_FIRST_CHAR)
+                    : 0; // 0 = space
+
+    // Iterate over the 7 rows of the glyph.
+    for (int row = 0; row < FONT_CHAR_H; ++row) {
+        const uint8_t row_data = FONT_5X7[idx][row];
+
+        // Each row byte encodes 5 pixels (bits 4..0, MSB = leftmost).
+        // Iterate columns right-to-left in bit significance.
+        for (int col = 0; col < FONT_CHAR_W; ++col) {
+            // bit4 = col0, bit3 = col1, ..., bit0 = col4
+            // Shift: (4 - col) puts the target bit into position 0.
+            const bool pixel_on = ((row_data >> (FONT_CHAR_W - 1 - col)) & 0x1u) != 0;
+            drawPixel(fb, x + col, y + row, pixel_on);
+        }
+    }
+}
+
+// =============================================================================
+// drawText
+// =============================================================================
+void drawText(FrameBuffer& fb, int x, int y, const char* text)
+{
+    if (!text) return;
+    int cursor_x = x;
+    while (*text != '\0') {
+        drawChar(fb, cursor_x, y, *text);
+        cursor_x += FONT_ADVANCE; // advance by glyph width + 1px gap
+        ++text;
+    }
+}
+
+// =============================================================================
+// drawRect
+// =============================================================================
+void drawRect(FrameBuffer& fb, int x, int y, int w, int h, bool color)
+{
+    for (int px = x; px < x + w; ++px) {
+        drawPixel(fb, px, y,           color); // top edge
+        drawPixel(fb, px, y + h - 1,   color); // bottom edge
+    }
+    for (int py = y; py < y + h; ++py) {
+        drawPixel(fb, x,           py, color); // left edge
+        drawPixel(fb, x + w - 1,   py, color); // right edge
+    }
+}
+
+// =============================================================================
+// drawBar
+// =============================================================================
+void drawBar(FrameBuffer& fb, int x, int y, int w, int h,
+             uint8_t value, uint8_t max_value)
+{
+    // Draw outer border.
+    drawRect(fb, x, y, w, h, true);
+
+    if (max_value == 0) return; // guard against division by zero
+
+    // Interior dimensions (border is 1px on each side).
+    const int inner_w = w - 2;
+    const int inner_h = h - 2;
+
+    // Equation:
+    //   fill_px = (value * inner_w) / max_value
+    //   Integer division truncates — acceptable for visual display.
+    //   At inner_w=80 and max=100, each pixel represents 1.25% of the stat.
+    const int fill_px = (static_cast<int>(value) * inner_w) / static_cast<int>(max_value);
+
+    // Fill the interior left-to-right up to fill_px.
+    for (int py = y + 1; py < y + 1 + inner_h; ++py) {
+        for (int px = x + 1; px < x + 1 + fill_px; ++px) {
+            drawPixel(fb, px, py, true);
         }
     }
 }

@@ -156,3 +156,52 @@ void drawSprite(FrameBuffer& fb,
                 const uint8_t* sprite,
                 const uint8_t* mask,
                 int width, int height);
+
+// -----------------------------------------------------------------------------
+// drawChar — Render a single ASCII character using the 5x7 bitmap font.
+//
+// Parameters:
+//   fb   : target framebuffer
+//   x, y : top-left pixel of the character cell
+//   c    : ASCII character (must be in [FONT_FIRST_CHAR, FONT_LAST_CHAR])
+//
+// Characters outside the supported range are silently rendered as space.
+// Each character occupies 5 pixels wide x 7 pixels tall.
+// -----------------------------------------------------------------------------
+void drawChar(FrameBuffer& fb, int x, int y, char c);
+
+// -----------------------------------------------------------------------------
+// drawText — Render a null-terminated ASCII string using the 5x7 bitmap font.
+//
+// Parameters:
+//   fb   : target framebuffer
+//   x, y : top-left pixel of the first character
+//   text : null-terminated C string (uppercase ASCII recommended)
+//
+// Characters are spaced FONT_ADVANCE (6) pixels apart horizontally.
+// Lines do not wrap — the caller is responsible for staying within bounds.
+// -----------------------------------------------------------------------------
+void drawText(FrameBuffer& fb, int x, int y, const char* text);
+
+// -----------------------------------------------------------------------------
+// drawRect — Draw an unfilled rectangle border.
+//
+// Used for stat bars, menu borders, etc.
+// -----------------------------------------------------------------------------
+void drawRect(FrameBuffer& fb, int x, int y, int w, int h, bool color);
+
+// -----------------------------------------------------------------------------
+// drawBar — Draw a filled horizontal progress bar.
+//
+// Parameters:
+//   fb    : target framebuffer
+//   x, y  : top-left corner of the bar (includes 1px border)
+//   w, h  : total outer dimensions in pixels
+//   value : current value  [0, max_value]
+//   max_value : scale maximum
+//
+// The bar interior is (w-2) x (h-2) pixels. The fill width is:
+//   fill_px = (value * (w - 2)) / max_value
+// -----------------------------------------------------------------------------
+void drawBar(FrameBuffer& fb, int x, int y, int w, int h,
+             uint8_t value, uint8_t max_value);

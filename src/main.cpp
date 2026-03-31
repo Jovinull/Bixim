@@ -12,6 +12,9 @@
 //   ITimer   — platform clock (TimerPC / TimerESP32)
 //   IDisplay — framebuffer flush (DisplayPC / DisplayESP32)
 //   IInput   — button state (InputPC / InputESP32)
+//
+// Logic modules:
+//   Pet      — FSM, stat decay, actions
 // =============================================================================
 
 // -----------------------------------------------------------------------------
@@ -36,6 +39,7 @@
 #include "hal/IDisplay.h"
 #include "hal/IInput.h"
 #include "hal/FrameBuffer.h"
+#include "logic/Pet.h"
 
 // =============================================================================
 // Game Loop Constants
@@ -47,9 +51,9 @@ static constexpr uint64_t FRAME_BUDGET_US            = 1'000'000ULL / TARGET_FPS
 static constexpr uint32_t MAX_LOGIC_TICKS_PER_FRAME  = 5;
 
 // =============================================================================
-// Demo sprite data — 16x16 pixels, horizontal format (MSB = leftmost pixel)
+// Sprite data — 16x16 pixels, horizontal format (MSB = leftmost pixel)
 // =============================================================================
-// Sprite A — simple face (default)
+// Normal face
 static const uint8_t SPRITE_FACE_A[16 * 2] = {
     0b00111100, 0b00000000,
     0b01000010, 0b00000000,
@@ -69,7 +73,7 @@ static const uint8_t SPRITE_FACE_A[16 * 2] = {
     0b00000000, 0b00000000,
 };
 
-// Sprite B — surprised face (shown when Button B is pressed)
+// Surprised / eating face
 static const uint8_t SPRITE_FACE_B[16 * 2] = {
     0b00111100, 0b00000000,
     0b01000010, 0b00000000,
@@ -89,7 +93,87 @@ static const uint8_t SPRITE_FACE_B[16 * 2] = {
     0b00000000, 0b00000000,
 };
 
-// Shared circular mask for both sprites
+// Sick face — X eyes, wavy mouth
+static const uint8_t SPRITE_FACE_SICK[16 * 2] = {
+    0b00111100, 0b00000000,
+    0b01000010, 0b00000000,
+    0b10010101, 0b00000000, // X X eyes
+    0b10101001, 0b00000000,
+    0b10010001, 0b00000000,
+    0b10000001, 0b00000000,
+    0b10010101, 0b00000000, // wavy mouth
+    0b01000010, 0b00000000,
+    0b00111100, 0b00000000,
+    0b00000000, 0b00000000,
+    0b00000000, 0b00000000,
+    0b00000000, 0b00000000,
+    0b00000000, 0b00000000,
+    0b00000000, 0b00000000,
+    0b00000000, 0b00000000,
+    0b00000000, 0b00000000,
+};
+
+// Dead face — X eyes, flat mouth
+static const uint8_t SPRITE_FACE_DEAD[16 * 2] = {
+    0b00111100, 0b00000000,
+    0b01000010, 0b00000000,
+    0b10010101, 0b00000000, // X X eyes
+    0b10101001, 0b00000000,
+    0b10010001, 0b00000000,
+    0b10000001, 0b00000000,
+    0b10011001, 0b00000000, // flat mouth
+    0b01000010, 0b00000000,
+    0b00111100, 0b00000000,
+    0b00000000, 0b00000000,
+    0b00000000, 0b00000000,
+    0b00000000, 0b00000000,
+    0b00000000, 0b00000000,
+    0b00000000, 0b00000000,
+    0b00000000, 0b00000000,
+    0b00000000, 0b00000000,
+};
+
+// Sleeping face — closed eyes
+static const uint8_t SPRITE_FACE_SLEEP[16 * 2] = {
+    0b00111100, 0b00000000,
+    0b01000010, 0b00000000,
+    0b10000001, 0b00000000,
+    0b10100101, 0b00000000, // closed eyes (lines)
+    0b10000001, 0b00000000,
+    0b10000001, 0b00000000,
+    0b10011001, 0b00000000,
+    0b01000010, 0b00000000,
+    0b00111100, 0b00000000,
+    0b00000000, 0b00000000,
+    0b00000000, 0b00000000,
+    0b00000000, 0b00000000,
+    0b00000000, 0b00000000,
+    0b00000000, 0b00000000,
+    0b00000000, 0b00000000,
+    0b00000000, 0b00000000,
+};
+
+// Egg / hatching sprite
+static const uint8_t SPRITE_EGG[16 * 2] = {
+    0b00011000, 0b00000000,
+    0b00111100, 0b00000000,
+    0b01111110, 0b00000000,
+    0b01111110, 0b00000000,
+    0b01111110, 0b00000000,
+    0b01111110, 0b00000000,
+    0b00111100, 0b00000000,
+    0b00011000, 0b00000000,
+    0b00000000, 0b00000000,
+    0b00000000, 0b00000000,
+    0b00000000, 0b00000000,
+    0b00000000, 0b00000000,
+    0b00000000, 0b00000000,
+    0b00000000, 0b00000000,
+    0b00000000, 0b00000000,
+    0b00000000, 0b00000000,
+};
+
+// Circular mask shared by all face sprites
 static const uint8_t MASK_FACE[16 * 2] = {
     0b00111100, 0b00000000,
     0b01111110, 0b00000000,
@@ -109,23 +193,153 @@ static const uint8_t MASK_FACE[16 * 2] = {
     0b00000000, 0b00000000,
 };
 
-// =============================================================================
-// Game state (shared between platforms via static storage)
-// =============================================================================
-static int  g_sprite_x       = (128 - 16) / 2;   // horizontal position, starts centered
-static int  g_sprite_y       = (64  - 16) / 2;   // vertical position, stays centered
-static bool g_use_sprite_b   = false;              // false = face A, true = face B
+// Mask for egg sprite
+static const uint8_t MASK_EGG[16 * 2] = {
+    0b00011000, 0b00000000,
+    0b00111100, 0b00000000,
+    0b01111110, 0b00000000,
+    0b01111110, 0b00000000,
+    0b01111110, 0b00000000,
+    0b01111110, 0b00000000,
+    0b00111100, 0b00000000,
+    0b00011000, 0b00000000,
+    0b00000000, 0b00000000,
+    0b00000000, 0b00000000,
+    0b00000000, 0b00000000,
+    0b00000000, 0b00000000,
+    0b00000000, 0b00000000,
+    0b00000000, 0b00000000,
+    0b00000000, 0b00000000,
+    0b00000000, 0b00000000,
+};
 
-// Movement step in pixels per logic tick (10 Hz → 10 px/s at step=1)
-static constexpr int MOVE_STEP = 3;
+// =============================================================================
+// HUD Layout Constants
+// =============================================================================
+// Sprite position: right side of screen, vertically centered
+static constexpr int SPRITE_X = 96;
+static constexpr int SPRITE_Y = (64 - 16) / 2; // 24
+
+// HUD bars: left column
+// Each bar: 2px label row + 3px gap + 5px bar height
+//   Bar area: x=0, w=88, h=5 (inner 3px tall)
+//   Labels are drawn as single-letter abbreviations
+static constexpr int BAR_X     = 8;   // left margin
+static constexpr int BAR_W     = 76;  // bar width including 1px border each side
+static constexpr int BAR_H     = 5;   // bar height including 1px border each side
+static constexpr int BAR_GAP   = 9;   // vertical spacing between bars (label + bar + gap)
+
+// Y positions for each stat row (label at Y, bar at Y+7)
+static constexpr int ROW_HUNGER    = 1;
+static constexpr int ROW_HAPPINESS = 1 + BAR_GAP + BAR_H;     // 15
+static constexpr int ROW_ENERGY    = 1 + 2 * (BAR_GAP + BAR_H); // 29
+static constexpr int ROW_HYGIENE   = 1 + 3 * (BAR_GAP + BAR_H); // 43
+
+// =============================================================================
+// Game State
+// =============================================================================
+static Pet g_pet;
 
 // =============================================================================
 // Forward declarations
 // =============================================================================
-void GameInit   (IDisplay& display, IInput& input, FrameBuffer& fb);
-void UpdateLogic(IInput& input, FrameBuffer& fb, uint64_t tick_count);
+void GameInit      (IDisplay& display, IInput& input, FrameBuffer& fb);
+void UpdateLogic   (IInput& input, FrameBuffer& fb, uint64_t tick_count);
 void RenderGraphics(IDisplay& display, const FrameBuffer& fb);
-void GameShutdown(IDisplay& display);
+void GameShutdown  (IDisplay& display);
+
+// =============================================================================
+// Helpers
+// =============================================================================
+
+// Returns the sprite + mask pair appropriate for the current pet state.
+static void selectSprite(const Pet& pet,
+                          const uint8_t*& out_sprite,
+                          const uint8_t*& out_mask)
+{
+    switch (pet.getState()) {
+    case PetState::HATCHING:
+        out_sprite = SPRITE_EGG;
+        out_mask   = MASK_EGG;
+        break;
+    case PetState::EATING:
+        out_sprite = SPRITE_FACE_B;
+        out_mask   = MASK_FACE;
+        break;
+    case PetState::SLEEPING:
+        out_sprite = SPRITE_FACE_SLEEP;
+        out_mask   = MASK_FACE;
+        break;
+    case PetState::SICK:
+        out_sprite = SPRITE_FACE_SICK;
+        out_mask   = MASK_FACE;
+        break;
+    case PetState::DEAD:
+        out_sprite = SPRITE_FACE_DEAD;
+        out_mask   = MASK_FACE;
+        break;
+    default: // IDLE
+        out_sprite = SPRITE_FACE_A;
+        out_mask   = MASK_FACE;
+        break;
+    }
+}
+
+// Returns the null-terminated state label (max 8 chars, uppercase).
+static const char* stateLabel(PetState s)
+{
+    switch (s) {
+    case PetState::HATCHING: return "HATCH";
+    case PetState::IDLE:     return "IDLE";
+    case PetState::EATING:   return "EAT";
+    case PetState::SLEEPING: return "SLEEP";
+    case PetState::SICK:     return "SICK";
+    case PetState::DEAD:     return "DEAD";
+    default:                 return "?";
+    }
+}
+
+// Draws the 4-bar HUD on the left side of the framebuffer.
+// Layout (x=BAR_X, column of 4 stat rows):
+//   "H" label + bar (hunger)
+//   "P" label + bar (happiness)
+//   "E" label + bar (energy)
+//   "C" label + bar (hygiene / cleanliness)
+static void drawHUD(FrameBuffer& fb, const Pet& pet)
+{
+    const PetStats& s = pet.getStats();
+
+    // --- Hunger ---
+    drawChar(fb, 0, ROW_HUNGER, 'H');
+    drawBar(fb,
+            BAR_X, ROW_HUNGER,
+            BAR_W, BAR_H,
+            s.hunger, 100);
+
+    // --- Happiness ---
+    drawChar(fb, 0, ROW_HAPPINESS, 'P');
+    drawBar(fb,
+            BAR_X, ROW_HAPPINESS,
+            BAR_W, BAR_H,
+            s.happiness, 100);
+
+    // --- Energy ---
+    drawChar(fb, 0, ROW_ENERGY, 'E');
+    drawBar(fb,
+            BAR_X, ROW_ENERGY,
+            BAR_W, BAR_H,
+            s.energy, 100);
+
+    // --- Hygiene ---
+    drawChar(fb, 0, ROW_HYGIENE, 'C');
+    drawBar(fb,
+            BAR_X, ROW_HYGIENE,
+            BAR_W, BAR_H,
+            s.hygiene, 100);
+
+    // --- State label (bottom row) ---
+    drawText(fb, 0, 57, stateLabel(pet.getState()));
+}
 
 // =============================================================================
 // Implementation
@@ -144,70 +358,65 @@ void GameInit(IDisplay& display, IInput& input, FrameBuffer& fb)
 
 void UpdateLogic(IInput& input, FrameBuffer& fb, uint64_t tick_count)
 {
-    // --- 1. Sample input (must be first in UpdateLogic) ---
+    // --- 1. Sample input ---
     input.Update();
 
     // --- 2. Process button events ---
 
-    // Button A — move sprite left
-    if (input.IsHeld(Button::A)) {
-        g_sprite_x -= MOVE_STEP;
-        // Clamp to display bounds
-        if (g_sprite_x < 0) g_sprite_x = 0;
-
+    // Button A — feed the pet
+    if (input.IsPressed(Button::A)) {
+        const bool accepted = g_pet.feed();
 #ifdef PLATFORM_PC
-        printf("[Input] A held — sprite_x = %d\n", g_sprite_x);
+        printf("[Input] A pressed — feed %s\n", accepted ? "accepted" : "ignored");
 #else
-        Serial.print(F("[Input] A held — sprite_x = "));
-        Serial.println(g_sprite_x);
+        Serial.print(F("[Input] A — feed "));
+        Serial.println(accepted ? F("ok") : F("ignored"));
 #endif
     }
 
-    // Button C — move sprite right
-    if (input.IsHeld(Button::C)) {
-        g_sprite_x += MOVE_STEP;
-        // Clamp: sprite is 16px wide
-        if (g_sprite_x > DISPLAY_WIDTH - 16) g_sprite_x = DISPLAY_WIDTH - 16;
-
-#ifdef PLATFORM_PC
-        printf("[Input] C held — sprite_x = %d\n", g_sprite_x);
-#else
-        Serial.print(F("[Input] C held — sprite_x = "));
-        Serial.println(g_sprite_x);
-#endif
-    }
-
-    // Button B — toggle between sprite A and B (fires once per press)
+    // Button B — play with the pet
     if (input.IsPressed(Button::B)) {
-        g_use_sprite_b = !g_use_sprite_b;
-
+        const bool accepted = g_pet.play();
 #ifdef PLATFORM_PC
-        printf("[Input] B pressed — sprite = %s\n", g_use_sprite_b ? "B" : "A");
+        printf("[Input] B pressed — play %s\n", accepted ? "accepted" : "ignored");
 #else
-        Serial.print(F("[Input] B pressed — sprite = "));
-        Serial.println(g_use_sprite_b ? F("B") : F("A"));
+        Serial.print(F("[Input] B — play "));
+        Serial.println(accepted ? F("ok") : F("ignored"));
 #endif
     }
 
-    // --- 3. Draw frame ---
+    // Button C — toggle sleep / wake
+    if (input.IsPressed(Button::C)) {
+        bool accepted = g_pet.sleep();
+        if (!accepted) accepted = g_pet.wake();
+#ifdef PLATFORM_PC
+        printf("[Input] C pressed — sleep/wake %s\n", accepted ? "accepted" : "ignored");
+#else
+        Serial.print(F("[Input] C — sleep/wake "));
+        Serial.println(accepted ? F("ok") : F("ignored"));
+#endif
+    }
+
+    // --- 3. Advance pet logic ---
+    g_pet.tick();
+
+    // --- 4. Draw frame ---
     fb.Clear();
 
-    // Border
-    for (int x = 0; x < DISPLAY_WIDTH;  ++x) {
-        drawPixel(fb, x, 0,                  true);
-        drawPixel(fb, x, DISPLAY_HEIGHT - 1, true);
-    }
-    for (int y = 0; y < DISPLAY_HEIGHT; ++y) {
-        drawPixel(fb, 0,                  y, true);
-        drawPixel(fb, DISPLAY_WIDTH - 1,  y, true);
-    }
-
     // Sprite
-    const uint8_t* active_sprite = g_use_sprite_b ? SPRITE_FACE_B : SPRITE_FACE_A;
-    drawSprite(fb, g_sprite_x, g_sprite_y, active_sprite, MASK_FACE, 16, 16);
+    const uint8_t* active_sprite = nullptr;
+    const uint8_t* active_mask   = nullptr;
+    selectSprite(g_pet, active_sprite, active_mask);
+    drawSprite(fb, SPRITE_X, SPRITE_Y, active_sprite, active_mask, 16, 16);
 
-    // Suppress unused parameter warning on configurations where tick_count
-    // is not yet used for animation.
+    // HUD
+    drawHUD(fb, g_pet);
+
+    // Divider between HUD and sprite area
+    for (int py = 0; py < DISPLAY_HEIGHT; ++py) {
+        drawPixel(fb, 88, py, true);
+    }
+
     (void)tick_count;
 }
 
@@ -296,7 +505,7 @@ void setup()
     Serial.println(F("[Bixim] Booting..."));
     GameInit(display, input, fb);
     t_last = timer.GetMicroseconds();
-    Serial.println(F("[Bixim] Boot complete. Buttons: A=GPIO25 B=GPIO26 C=GPIO27"));
+    Serial.println(F("[Bixim] Boot complete. A=feed B=play C=sleep/wake"));
 }
 
 void loop()

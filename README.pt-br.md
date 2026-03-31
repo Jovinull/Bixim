@@ -53,6 +53,7 @@ A etapa de prototipagem física e manufatura da carcaça final pode ser realizad
 
 - [x] Prototipagem da lógica de estados e renderização na matriz OLED (Timestep Fixo & HAL implementados).
 - [x] Implementação da camada de entrada abstraída e debouncing (IInput HAL).
+- [x] Implementação da lógica do Pet (FSM), sistema de decaimento e interface HUD.
 - [ ] Implementação de áudio (Buzzer PWM).
 - [ ] Otimização de consumo energético (Sleep Modes do ESP32).
 - [ ] Integração do hardware final na carcaça.

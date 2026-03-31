@@ -53,6 +53,7 @@ The physical prototyping and manufacturing of the final case can be done through
 
 - [x] Prototyping state logic and rendering on the OLED matrix (Fixed Timestep & HAL implemented).
 - [x] Implementation of hardware-abstracted input system and debouncing (IInput HAL).
+- [x] Implementation of Pet FSM, statistics decay system, and HUD rendering.
 - [ ] Implementation of audio system (Buzzer PWM).
 - [ ] Energy consumption optimization (ESP32 Sleep Modes).
 - [ ] Integration of final hardware into the case.
